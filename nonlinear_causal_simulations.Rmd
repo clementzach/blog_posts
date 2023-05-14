@@ -1,0 +1,210 @@
+---
+title: "double_ml"
+author: "Zachary Clement"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+#remotes::install_github("DoubleML/doubleml-for-r")
+```
+
+
+
+
+```{r}
+
+random_function <- function(c){
+    slope = runif(1)
+    return(c*slope)
+}
+
+random_function <- function(c){
+    randnum = runif(1)
+    if (randnum < .25){
+        return(cos(c))
+    }
+    else if (randnum < .5){
+        return(sin(c))
+    }
+    else if (randnum < .75){
+        return(c^2)
+
+    }
+    else {
+        return(exp(c)    )        
+}
+}
+
+
+```
+
+```{r}
+generate_data <- function (n, n_confounders = 3, p_confounder = .5, effect_size = 2){
+
+    c0 = rnorm(n)
+    df = data.frame(c0 = c0) #at least one confounder
+    m1 = c0 + rnorm(n)
+    m2 = c0 + rnorm(n)
+
+    for (i in 1:n_confounders){
+        c = rnorm(n)
+        if (runif(1) < p_confounder){
+            m1 = m1 + random_function(c)
+            m2 = m2 + random_function(c)
+    }
+        df[,paste0("c", as.character(i))] = c
+    }
+
+    x = rnorm(n, sd = sd(m1) / 2) + m1
+
+    y = x * effect_size + m2 + rnorm(n, sd = sd(m2) /10)
+    df$x = x
+    df$y = y
+    return(df)
+
+}
+```
+
+```{r}
+get_estimates <- function(n = 3000){
+    df = generate_data(n)
+    df_doubleml = DoubleML::double_ml_data_from_data_frame(df, y_col = c("y"), d_cols = c("x"))
+    dml_obj = DoubleML::DoubleMLPLR$new(df_doubleml, mlr3::lrn("regr.svm"), mlr3::lrn("regr.svm"))
+    dml_obj$fit()
+    dml_df = data.frame(dml_obj$confint())
+    colnames(dml_df) <- c("dml_lower", "dml_upper")
+    x_var = summary(lm(y ~ ., data = df))$coefficients["x",] 
+
+    linear_df = data.frame((x_var["Estimate"] + c(-1, 1) *qnorm(.975) * x_var["Std. Error"]) |> t())
+    colnames(linear_df) <- c("linear_lower", "linear_upper")
+    
+    spline_mod = lm(y ~ x +  splines::ns(c0) + splines::ns(c1, df = 3) + splines::ns(c2, df = 3) + splines::ns(c3, df = 3), data = df)
+
+    x_var = summary(spline_mod)$coefficients["x",] 
+    spline_df = data.frame((x_var["Estimate"] + c(-1, 1) * qnorm(.975) * x_var["Std. Error"]) |> t())
+    colnames(spline_df) <- c("spline_lower", "spline_upper")
+    
+    output_df = cbind(spline_df, linear_df, dml_df)
+    return(c(output_df[1,]))
+    
+}
+```
+
+```{r}
+n_simulations = 30
+simulations = replicate(n_simulations, get_estimates(), simplify = TRUE)
+
+simulations_df = data.frame(simulations[,1])
+for (i in 2:n_simulations){
+    simulations_df = rbind(simulations_df, data.frame(simulations[,i]))
+}
+
+```
+
+```{r}
+
+ylim_vec = c(
+    min(c(simulations_df$dml_lower, simulations_df$linear_lower, simulations_df$spline_lower)), 
+        max(c(simulations_df$dml_upper, simulations_df$linear_upper, simulations_df$spline_upper))
+    )
+plot(1:n_simulations, simulations_df$spline_lower, ylim = ylim_vec
+    )
+points(1:n_simulations, simulations_df$spline_upper)
+#points(1:n_simulations, simulations_df$linear_upper, col = "blue")
+#points(1:n_simulations, simulations_df$linear_lower, col = "blue")
+points(1:n_simulations, simulations_df$dml_upper, col = "green")
+points(1:n_simulations, simulations_df$dml_lower, col = "green")
+```
+
+```{r}
+dml_coverage = mean(simulations_df$dml_lower < 2 & simulations_df$dml_upper > 2)
+linear_coverage = mean(simulations_df$linear_lower < 2 & simulations_df$linear_upper > 2)
+spline_coverage = mean(simulations_df$spline_lower < 2 & simulations_df$spline_upper > 2)
+```
+
+
+
+
+```{r}
+linear_df = data.frame(x_var["Estimate"] + c(-1, 1) *qnorm(.975) * x_var["Std. Error"])
+```
+
+
+```{r}
+dml_df = data.frame(dml_obj$confint())
+colnames(dml_df) <- c("dml_lower", "dml_upper")
+```
+
+```{r}
+dml_df
+```
+
+
+```{r}
+df = generate_data(1000)
+
+```
+
+```{r}
+#dml_obj = DoubleML::DoubleMLPLR$new(df_doubleml, mlr3::lrn("regr.xgboost"), mlr3::lrn("regr.xgboost"))
+
+# mlr3::lrns() to see list of learners
+```
+
+```{r}
+
+
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+```{r}
+spline_mod = lm(y ~ x +  splines::ns(c0) + splines::ns(c1) + splines::ns(c2) + splines::ns(c3), data = df)
+
+x_var = summary(spline_mod)$coefficients["x",] 
+
+x_var["Estimate"] + c(-1, 1) *qnorm(.975) * x_var["Std. Error"]
+```
+
+
+
+```{r}
+get_data <- function(n){
+    x = rnorm(n)
+    y = cos(x) + rnorm(n, sd = 0.05)
+    return(data.frame(x = x, y=y))
+}
+```
+
+
+
+```{r}
+df = get_data(500)
+
+task = mlr3::as_task_regr(y ~ x, data = df)
+
+learner = mlr3::lrn("regr.svm")
+
+learner$train(task)
+
+mlr3::lrns()
+```
+
+```{r}
+
+df = get_data(50)
+task2 = mlr3::as_task_regr(y ~ x, data = df)
+
+preds = learner$predict(task2)
+
+
+plot(df$x, df$y, col = "green")
+points(df$x, preds$response)
+```
