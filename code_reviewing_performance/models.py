@@ -15,10 +15,10 @@ def call_model(model_label: str, system_prompt: str, user_prompt: str) -> str:
         client = anthropic.Anthropic()
         response = client.messages.create(
             model=MODEL_IDS["claude"],
-            max_tokens=4096,
+            max_tokens=16000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
-            output_config={"effort": "medium"},
+            thinking={"type": "enabled", "budget_tokens": 10000},
         )
         # With thinking enabled, content may include a thinking block before the text block
         text = next(
