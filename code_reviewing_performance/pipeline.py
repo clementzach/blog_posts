@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 
 from dataset import load_mbpp_sample
-from harness import run_test
+from harness import run_test, _last_defined_function
 from models import call_model
 
 CACHE_DIR = Path("cache")
@@ -136,15 +136,19 @@ _GENERATION_USER = (
 
 _REVIEW_SYSTEM = (
     "{persona}\n\n"
-    "Review Python code for correctness (defined as whether the code will fully solve all parts of the problem statement without any errors). When asked, respond ONLY with valid JSON "
+    "Review Python code for correctness (defined as whether the code will fully solve all parts "
+    "of the problem statement without any errors). If you see something that might be a possible "
+    "bug, err on the side of reporting a bug rather than letting one slip by. "
+    "When asked, respond ONLY with valid JSON "
     'in this exact format: {{"has_bug": true}} or {{"has_bug": false}}. No other text.'
 )
 
 _REVIEW_USER = (
     "Problem statement:\n{problem_text}\n\n"
     "Code to review:\n```python\n{code}\n```\n\n"
-    "Does this code contain a bug that would cause it to not function correctly "
-    'for the given problem? Respond with JSON only: {{"has_bug": true}} or {{"has_bug": false}}.'
+    "Does this code seem likely to contain a bug that would cause it to not function correctly "
+    'for the given problem? Respond with JSON only: {{"has_bug": true}} or {{"has_bug": false}}. '
+
 )
 
 _FIX_SYSTEM = (
@@ -241,18 +245,19 @@ def run_pipeline(
     ground_truth: dict[tuple[str, int], bool] = {}
     gt_lock = Lock()
 
-    def _gt_task(model: str, problem: dict) -> tuple[tuple[str, int], bool]:
+    def _gt_task(model: str, problem: dict) -> tuple[tuple[str, int], tuple[bool, str | None]]:
         code = generations[(model, problem["task_id"])]["code"]
-        passed = run_test(code, problem["test_list"])
-        return (model, problem["task_id"]), passed
+        expected_func = _last_defined_function(problem["code"])
+        passed, error = run_test(code, problem["test_list"], expected_func)
+        return (model, problem["task_id"]), (passed, error)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         gt_futures = [executor.submit(_gt_task, model, problem)
                       for model in ALL_MODELS for problem in problems]
         for future in as_completed(gt_futures):
-            key, passed = future.result()
+            key, result = future.result()
             with gt_lock:
-                ground_truth[key] = passed
+                ground_truth[key] = result
 
     # Step 3 + 4: Review and fix (all combinations in parallel; fix is sequential within each)
     total_reviews = len(ALL_MODELS) * 6 * len(problems)
@@ -267,7 +272,7 @@ def run_pipeline(
         task_id = problem["task_id"]
         gen_data = generations[(gen_model, task_id)]
         code = gen_data["code"]
-        pre_review_pass = ground_truth[(gen_model, task_id)]
+        pre_review_pass, pre_review_error = ground_truth[(gen_model, task_id)]
 
         has_bug, parse_failure_review = review_code(
             rev_model, rev_persona, problem, code, sleep_seconds
@@ -283,7 +288,8 @@ def run_pipeline(
             )
             corrected_code = fixed_code
             if fixed_code:
-                post_review_pass = run_test(fixed_code, problem["test_list"])
+                expected_func = _last_defined_function(problem["code"])
+                post_review_pass, _ = run_test(fixed_code, problem["test_list"], expected_func)
 
         return {
             "problem_id": task_id,
@@ -292,8 +298,10 @@ def run_pipeline(
             "reviewer_model": rev_model,
             "reviewer_persona": rev_persona,
             "bug_detected": has_bug,
+            "pre_review_code": code,
             "corrected_code": corrected_code,
             "successful_run_pre_review": pre_review_pass,
+            "pre_review_error": pre_review_error,
             "successful_run_post_review": post_review_pass,
             "parse_failure_generation": gen_data["parse_failure_generation"],
             "parse_failure_review": parse_failure_review,
