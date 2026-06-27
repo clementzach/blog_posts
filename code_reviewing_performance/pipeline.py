@@ -166,7 +166,7 @@ _FIX_USER = (
 
 def generate_code(model: str, problem: dict, sleep_seconds: float = 0.0) -> tuple[str, bool]:
     system = PERSONA_1
-    user = _GENERATION_USER.format(problem_text=problem["text"])
+    user = _GENERATION_USER.format(problem_text=problem["prompt"])
     response = cached_call(model, system, user, sleep_seconds)
     return extract_code_generation(response)
 
@@ -180,7 +180,7 @@ def review_code(
 ) -> tuple[bool | None, bool]:
     persona = PERSONAS[reviewer_persona_key]
     system = _REVIEW_SYSTEM.format(persona=persona)
-    user = _REVIEW_USER.format(problem_text=problem["text"], code=code)
+    user = _REVIEW_USER.format(problem_text=problem["prompt"], code=code)
     response = cached_call(reviewer_model, system, user, sleep_seconds)
     return parse_review_json(response)
 
@@ -194,7 +194,7 @@ def get_fix(
 ) -> tuple[str | None, bool]:
     persona = PERSONAS[reviewer_persona_key]
     system = _FIX_SYSTEM.format(persona=persona)
-    user = _FIX_USER.format(problem_text=problem["text"], code=code)
+    user = _FIX_USER.format(problem_text=problem["prompt"], code=code)
     response = cached_call(reviewer_model, system, user, sleep_seconds)
     return extract_code_fix(response)
 
