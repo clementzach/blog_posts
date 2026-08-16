@@ -1,16 +1,15 @@
-"""Select the 50 hardest MBPP problems from the already-cached prior-study results.
+"""Select the "hard" MBPP problems from the already-cached prior-study results.
 
-"Hardest" = lowest mean pass@1 across the three generator models
-(claude, gpt, gemini), computed from ``results/results.json`` so that no new
-generation is required. See STUDY_DESIGN.md section 2.
+"Hard" = at least one of the two generator models (gpt, gemini) failed it,
+computed from ``results/results.json`` so that no new generation is required.
+See STUDY_DESIGN.md section 2.
 """
 
 import json
 from pathlib import Path
 
 RESULTS_DIR = Path("results")
-GENERATORS = ("claude", "gpt", "gemini")
-N_HARD = 50
+GENERATORS = ("gpt", "gemini")
 
 
 def problem_pass_rates(results: list[dict]) -> dict[int, float]:
@@ -37,16 +36,19 @@ def problem_pass_rates(results: list[dict]) -> dict[int, float]:
 
 
 def select_hard_problems(
-    results_path: Path = RESULTS_DIR / "results.json", n: int = N_HARD
+    results_path: Path = RESULTS_DIR / "results.json", n: int | None = None
 ) -> list[int]:
-    """Return the ``n`` hardest problem ids (lowest mean pass rate).
+    """Return problem ids where at least one generator got it wrong.
 
-    Ties are broken by ``problem_id`` for determinism.
+    That is, every ``pid`` with mean pass rate < 1.0 across ``GENERATORS``.
+    Sorted by ascending pass rate (hardest first), ties broken by
+    ``problem_id`` for determinism. If ``n`` is given, cap the result to the
+    ``n`` hardest of those.
     """
     results = json.loads(Path(results_path).read_text())
     rates = problem_pass_rates(results)
-    ranked = sorted(rates.items(), key=lambda kv: (kv[1], kv[0]))
-    return [pid for pid, _ in ranked[:n]]
+    hard = sorted((pid for pid, rate in rates.items() if rate < 1.0), key=lambda pid: (rates[pid], pid))
+    return hard[:n] if n is not None else hard
 
 
 def main() -> None:

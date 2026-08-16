@@ -1,13 +1,10 @@
-import anthropic
 from google import genai
 from google.genai import types
 from openai import OpenAI
 
 MODEL_IDS = {
-    "claude": "claude-haiku-4-5",
-    "sonnet": "claude-sonnet-5",
-    "gpt": "gpt-5.4-mini-2026-03-17",
-    "gemini": "gemini-3.5-flash",
+    "gpt": "gpt-5.6-luna",
+    "gemini": "gemini-3.5-flash-lite",
     "qwen_instruct": "Qwen/Qwen2.5-Coder-7B-Instruct",
 }
 
@@ -41,41 +38,7 @@ def _load_qwen_instruct():
 
 
 def call_model(model_label: str, system_prompt: str, user_prompt: str) -> str:
-    if model_label == "claude":
-        client = anthropic.Anthropic()
-        response = client.messages.create(
-            model=MODEL_IDS["claude"],
-            max_tokens=16000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            thinking={"type": "enabled", "budget_tokens": 10000},
-        )
-        # With thinking enabled, content may include a thinking block before the text block
-        text = next(
-            (block.text for block in response.content if hasattr(block, "text")),
-            "",
-        )
-        return text
-
-    elif model_label == "sonnet":
-        client = anthropic.Anthropic()
-        # Sonnet 5 uses adaptive thinking + effort; the enabled/budget_tokens form
-        # returns a 400 on this model.
-        response = client.messages.create(
-            model=MODEL_IDS["sonnet"],
-            max_tokens=16000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            thinking={"type": "adaptive"},
-            output_config={"effort": "high"},
-        )
-        text = next(
-            (block.text for block in response.content if hasattr(block, "text")),
-            "",
-        )
-        return text
-
-    elif model_label == "gpt":
+    if model_label == "gpt":
         client = OpenAI()
         # Responses API with reasoning locks temperature at 1; do not set temperature
         response = client.responses.create(

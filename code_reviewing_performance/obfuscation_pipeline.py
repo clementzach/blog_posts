@@ -1,10 +1,11 @@
 """Obfuscation / memorization / self-preference pipeline.
 
-Builds a chunk registry of the 50 hardest MBPP problems x 4 sources, applies
+Builds a chunk registry of the MBPP problems at least one generator got
+wrong, x 3 sources, applies
 the three obfuscation transforms, then runs:
 
 * Phase 1 (local Qwen2.5-Coder-7B): per-chunk perplexity scoring only.
-* Phase 2 (Gemini API): bug detection, self-preference focus.
+* Phase 2 (Gemini + GPT API): bug detection, self-preference focus.
 
 Reuses the existing prompts/cache/harness: ``pipeline.review_code`` (which goes
 through ``cached_call`` + ``parse_review_json``) for detection, ``harness``
@@ -25,15 +26,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from dataset import load_mbpp_sample
-from harness import _last_defined_function, run_test
-from pipeline import review_code
+from harness import run_test_plus
+from pipeline import _REVIEW_SYSTEM, _REVIEW_USER, PERSONAS, review_code
 from select_hard_problems import select_hard_problems
 from transforms import TRANSFORMS, apply_transform
 
 RESULTS_DIR = Path("results")
-MODEL_SOURCES = ("claude", "gpt", "gemini")  # from results.json
-PHASE2_SOURCES = ("claude", "gemini", "human")
-PHASE3_REVIEWERS = ("claude", "gpt", "sonnet")  # reviewers of human code, original only
+MODEL_SOURCES = ("gpt", "gemini")  # from results.json
+PHASE2_SOURCES = ("gpt", "gemini", "human")
+PHASE2_REVIEWERS = ("gemini", "gpt")
+PHASE3_REVIEWERS = ("gpt", "gemini")  # reviewers of human code, original only
 REVIEW_PERSONA = "persona_1"
 
 
@@ -53,7 +55,7 @@ def _generated_code_index(results_path: Path) -> dict[tuple[str, int], tuple[str
 
 
 def build_chunk_registry(n_problems: int | None = None) -> list[dict]:
-    """One chunk per (problem, source) for the 50 hardest problems.
+    """One chunk per (problem, source) for problems at least one generator got wrong.
 
     Model-source code and correctness are reused from ``results/results.json``;
     the ``human`` source is the MBPP canonical solution, labeled by running it
@@ -64,7 +66,7 @@ def build_chunk_registry(n_problems: int | None = None) -> list[dict]:
         hard_ids = hard_ids[:n_problems]
     hard_set = set(hard_ids)
 
-    problems = {p["task_id"]: p for p in load_mbpp_sample(200) if p["task_id"] in hard_set}
+    problems = {p["task_id"]: p for p in load_mbpp_sample(None) if p["task_id"] in hard_set}
     gen_index = _generated_code_index(RESULTS_DIR / "results.json")
 
     chunks: list[dict] = []
@@ -76,8 +78,7 @@ def build_chunk_registry(n_problems: int | None = None) -> list[dict]:
             chunks.append(_make_chunk(pid, source, code, is_correct, problem))
 
         human_code = problem["code"]
-        expected_func = _last_defined_function(human_code)
-        human_correct, _ = run_test(human_code, problem["test_list"], expected_func)
+        human_correct, _ = run_test_plus(human_code, problem["test"], problem["test_imports"])
         chunks.append(_make_chunk(pid, "human", human_code, human_correct, problem))
 
     return chunks
@@ -127,29 +128,44 @@ def run_phase1(chunks: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: Gemini API (detection)
+# Phase 2: API detection (Gemini + GPT reviewers), self-preference focus
 # ---------------------------------------------------------------------------
 
-def run_phase2(chunks: list[dict], max_workers: int = 50) -> list[dict]:
+def run_phase2(chunks: list[dict], max_workers: int = 50, use_batch: bool = True) -> list[dict]:
     variants = [
         v
         for c in chunks
         if c["source"] in PHASE2_SOURCES
         for v in transform_variants(c)
     ]
+    tasks = [(reviewer, v) for reviewer in PHASE2_REVIEWERS for v in variants]
+
+    if use_batch:
+        import batch
+
+        system = _REVIEW_SYSTEM.format(persona=PERSONAS[REVIEW_PERSONA])
+        calls_by_reviewer: dict[str, list[tuple[str, str]]] = {r: [] for r in PHASE2_REVIEWERS}
+        for reviewer, v in tasks:
+            user = _REVIEW_USER.format(problem_text=v["problem"]["prompt"], code=v["code"])
+            calls_by_reviewer[reviewer].append((system, user))
+        for reviewer in PHASE2_REVIEWERS:
+            batch.batch_precache(reviewer, calls_by_reviewer[reviewer])
+
     records: list[dict] = []
     lock = Lock()
-    total = len(variants)
+    total = len(tasks)
     done = 0
 
-    def _task(v: dict) -> dict:
+    def _task(reviewer: str, v: dict) -> dict:
         has_bug, parse_failure = review_code(
-            "gemini", REVIEW_PERSONA, v["problem"], v["code"]
+            reviewer, REVIEW_PERSONA, v["problem"], v["code"]
         )
-        return _detection_record(v, has_bug, parse_failure, None)
+        record = _detection_record(v, has_bug, parse_failure, None)
+        record["reviewer_model"] = reviewer
+        return record
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = [executor.submit(_task, v) for v in variants]
+        futures = [executor.submit(_task, reviewer, v) for reviewer, v in tasks]
         for future in as_completed(futures):
             records.append(future.result())
             with lock:
@@ -163,13 +179,25 @@ def run_phase2(chunks: list[dict], max_workers: int = 50) -> list[dict]:
 # Phase 3: Claude / GPT reviewing human code (original only)
 # ---------------------------------------------------------------------------
 
-def run_phase3(chunks: list[dict], max_workers: int = 50) -> list[dict]:
+def run_phase3(chunks: list[dict], max_workers: int = 50, use_batch: bool = True) -> list[dict]:
     """Each of PHASE3_REVIEWERS reviews every human chunk's original code.
 
     No obfuscation transforms: 50 human chunks x 2 reviewers = 100 detections.
     """
     human_chunks = [c for c in chunks if c["source"] == "human"]
     tasks = [(reviewer, c) for reviewer in PHASE3_REVIEWERS for c in human_chunks]
+
+    if use_batch:
+        import batch
+
+        system = _REVIEW_SYSTEM.format(persona=PERSONAS[REVIEW_PERSONA])
+        calls_by_reviewer: dict[str, list[tuple[str, str]]] = {r: [] for r in PHASE3_REVIEWERS}
+        for reviewer, c in tasks:
+            user = _REVIEW_USER.format(problem_text=c["problem"]["prompt"], code=c["code_original"])
+            calls_by_reviewer[reviewer].append((system, user))
+        for reviewer in PHASE3_REVIEWERS:
+            batch.batch_precache(reviewer, calls_by_reviewer[reviewer])
+
     records: list[dict] = []
     lock = Lock()
     total = len(tasks)
@@ -232,22 +260,27 @@ def main() -> None:
     parser.add_argument("--phase", choices=["1", "2", "3", "both", "all"], default="both")
     parser.add_argument("--n", type=int, default=None, help="Limit #problems (smoke test)")
     parser.add_argument("--max-workers", type=int, default=50)
+    parser.add_argument(
+        "--no-batch", action="store_true",
+        help="Skip provider Batch API precaching; issue live requests only.",
+    )
     args = parser.parse_args()
+    use_batch = not args.no_batch
 
     chunks = build_chunk_registry(n_problems=args.n)
-    print(f"Built {len(chunks)} chunks ({len(chunks) // 4} problems x 4 sources)")
+    print(f"Built {len(chunks)} chunks ({len(chunks) // 3} problems x 3 sources)")
 
     if args.phase in ("1", "both", "all"):
         print("Phase 1: local Qwen perplexity scoring...")
         _write(run_phase1(chunks), "obfuscation_phase1")
 
     if args.phase in ("2", "both", "all"):
-        print("Phase 2: Gemini detection...")
-        _write(run_phase2(chunks, args.max_workers), "obfuscation_phase2")
+        print("Phase 2: gemini / gpt detection...")
+        _write(run_phase2(chunks, args.max_workers, use_batch), "obfuscation_phase2")
 
     if args.phase in ("3", "all"):
-        print("Phase 3: Claude / GPT reviewing human code (original only)...")
-        _write(run_phase3(chunks, args.max_workers), "obfuscation_phase3")
+        print("Phase 3: gpt / gemini reviewing human code (original only)...")
+        _write(run_phase3(chunks, args.max_workers, use_batch), "obfuscation_phase3")
 
 
 if __name__ == "__main__":

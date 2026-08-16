@@ -7,7 +7,7 @@ from pathlib import Path
 from threading import Lock
 
 from dataset import load_mbpp_sample
-from harness import run_test, _last_defined_function
+from harness import run_test_plus
 from models import call_model
 
 CACHE_DIR = Path("cache")
@@ -32,15 +32,20 @@ PERSONA_2 = (
 
 PERSONAS = {"persona_1": PERSONA_1, "persona_2": PERSONA_2}
 
-ALL_MODELS = ["claude", "gpt", "gemini"]
+ALL_MODELS = ["gpt", "gemini"]
 
-# For each generator model, the two other models in a fixed order (ensures
-# both cross-model pairings are distinct, not collapsed to one).
-OTHER_MODELS = {
-    "claude": ["gpt", "gemini"],
-    "gpt": ["claude", "gemini"],
-    "gemini": ["claude", "gpt"],
-}
+# For each generator model, the other models in the set (excludes itself).
+OTHER_MODELS = {m: [o for o in ALL_MODELS if o != m] for m in ALL_MODELS}
+
+
+def reviewer_conditions(gen_model: str) -> list[tuple[str, str]]:
+    """(reviewer_model, reviewer_persona) pairs for a given generator: itself
+    plus every other model, each at both personas."""
+    return [
+        (rev_model, rev_persona)
+        for rev_model in [gen_model] + OTHER_MODELS[gen_model]
+        for rev_persona in PERSONAS
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +136,8 @@ _GENERATION_SYSTEM = "{persona}"
 _GENERATION_USER = (
     "Write a Python function to solve the following problem:\n\n"
     "{problem_text}\n\n"
+    "Your function will be called like this:\n"
+    "{example_test}\n\n"
     "Return only the code inside a ```python ... ``` fenced block."
 )
 
@@ -168,9 +175,17 @@ _FIX_USER = (
 # Pipeline steps
 # ---------------------------------------------------------------------------
 
+def _example_test(problem: dict) -> str:
+    """First test case, revealed in the generation prompt to disambiguate
+    argument order / return shape / parameter count."""
+    return problem["test_list"][0] if problem["test_list"] else ""
+
+
 def generate_code(model: str, problem: dict, sleep_seconds: float = 0.0) -> tuple[str, bool]:
     system = PERSONA_1
-    user = _GENERATION_USER.format(problem_text=problem["prompt"])
+    user = _GENERATION_USER.format(
+        problem_text=problem["prompt"], example_test=_example_test(problem)
+    )
     response = cached_call(model, system, user, sleep_seconds)
     return extract_code_generation(response)
 
@@ -208,12 +223,29 @@ def get_fix(
 # ---------------------------------------------------------------------------
 
 def run_pipeline(
-    n_problems: int = 200,
+    n_problems: int | None = None,
     sleep_seconds: float = 0.0,
     max_workers: int = 100,
+    use_batch: bool = True,
 ) -> list[dict]:
     RESULTS_DIR.mkdir(exist_ok=True)
     problems = load_mbpp_sample(n_problems)
+
+    if use_batch:
+        import batch
+
+        print(f"Batch precache: generation ({len(ALL_MODELS)} models × {len(problems)} problems)")
+        for model in ALL_MODELS:
+            calls = [
+                (
+                    PERSONA_1,
+                    _GENERATION_USER.format(
+                        problem_text=problem["prompt"], example_test=_example_test(problem)
+                    ),
+                )
+                for problem in problems
+            ]
+            batch.batch_precache(model, calls)
 
     # Step 1: Generation (all model × problem pairs in parallel)
     print(f"\nStep 1: Generating code ({len(ALL_MODELS)} models × {len(problems)} problems)...")
@@ -247,8 +279,7 @@ def run_pipeline(
 
     def _gt_task(model: str, problem: dict) -> tuple[tuple[str, int], tuple[bool, str | None]]:
         code = generations[(model, problem["task_id"])]["code"]
-        expected_func = _last_defined_function(problem["code"])
-        passed, error = run_test(code, problem["test_list"], expected_func)
+        passed, error = run_test_plus(code, problem["test"], problem["test_imports"])
         return (model, problem["task_id"]), (passed, error)
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -259,8 +290,25 @@ def run_pipeline(
             with gt_lock:
                 ground_truth[key] = result
 
+    if use_batch:
+        import batch
+
+        print("Batch precache: review calls")
+        review_calls: dict[str, list[tuple[str, str]]] = {m: [] for m in ALL_MODELS}
+        for gen_model in ALL_MODELS:
+            for rev_model, rev_persona in reviewer_conditions(gen_model):
+                system = _REVIEW_SYSTEM.format(persona=PERSONAS[rev_persona])
+                for problem in problems:
+                    code = generations[(gen_model, problem["task_id"])]["code"]
+                    user = _REVIEW_USER.format(problem_text=problem["prompt"], code=code)
+                    review_calls[rev_model].append((system, user))
+        for model in ALL_MODELS:
+            batch.batch_precache(model, review_calls[model])
+
     # Step 3 + 4: Review and fix (all combinations in parallel; fix is sequential within each)
-    total_reviews = len(ALL_MODELS) * 6 * len(problems)
+    # NOTE: get_fix calls are not batch-precached -- whether a fix is needed
+    # depends on the review outcome above, so those calls stay live.
+    total_reviews = len(ALL_MODELS) * len(ALL_MODELS) * len(PERSONAS) * len(problems)
     print(f"Step 3+4: Reviewing ({total_reviews} calls)...")
     results: list[dict] = []
     review_count = 0
@@ -288,8 +336,9 @@ def run_pipeline(
             )
             corrected_code = fixed_code
             if fixed_code:
-                expected_func = _last_defined_function(problem["code"])
-                post_review_pass, _ = run_test(fixed_code, problem["test_list"], expected_func)
+                post_review_pass, _ = run_test_plus(
+                    fixed_code, problem["test"], problem["test_imports"]
+                )
 
         return {
             "problem_id": task_id,
@@ -311,15 +360,7 @@ def run_pipeline(
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         rf_futures = {}
         for gen_model in ALL_MODELS:
-            reviewer_conditions = [
-                (gen_model, "persona_1"),
-                (gen_model, "persona_2"),
-                (OTHER_MODELS[gen_model][0], "persona_1"),
-                (OTHER_MODELS[gen_model][0], "persona_2"),
-                (OTHER_MODELS[gen_model][1], "persona_1"),
-                (OTHER_MODELS[gen_model][1], "persona_2"),
-            ]
-            for rev_model, rev_persona in reviewer_conditions:
+            for rev_model, rev_persona in reviewer_conditions(gen_model):
                 for problem in problems:
                     f = executor.submit(_review_fix_task, gen_model, rev_model, rev_persona, problem)
                     rf_futures[f] = (gen_model, rev_model, rev_persona, problem["task_id"])
