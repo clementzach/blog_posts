@@ -4,3 +4,7 @@ google-genai
 datasets
 python-dotenv
 pandas
+statsmodels
+# NOTE: The local Qwen Phase 1 (torch + transformers) and analysis stats are
+# NOT installable here on Intel-macOS / Python 3.14 (no torch wheels). Use a
+# Python 3.11/3.12 venv with requirements-qwen.txt for that; see STUDY_DESIGN.md.
