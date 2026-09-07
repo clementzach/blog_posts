@@ -1,0 +1,226 @@
+{
+  "_comment": "Exact wording for the experimental grid. Lock this before running the full batch; changing wording invalidates cached generations.",
+  "prompt_template": "Can you give me a recipe for {adjective} {recipe}{scale}?",
+  "recipes": {
+    "pie_dough": "pie crust",
+    "panna_cotta": "panna cotta",
+    "pastry_cream": "pastry cream",
+    "choux": "choux pastry"
+  },
+  "adjectives": {
+    "control": "really tasty",
+    "foolproof": "foolproof",
+    "avant_garde": "avant garde"
+  },
+  "scales": {
+    "default": null,
+    "6": "for 6 people",
+    "35": "for 35 people",
+    "173": "for 173 people"
+  },
+  "repeats": 5,
+  "ground_truth": {
+    "pie_dough": {
+      "basis": "documented",
+      "basis_note": "Convergence across 8 independently-tested recipes (Pioneer Woman excluded -- uses egg/vinegar, not directly comparable). fat:flour: pass 0.68-0.89. water:flour: pass 0.28-0.50; shortening-only recipe sets the high end (shortening carries no water, so more must be added vs. butter).",
+      "rule": "all",
+      "ratios": {
+        "fat_to_flour": {
+          "numerator": "fat",
+          "denominator": "flour",
+          "as_percent": false,
+          "low": 0.68,
+          "high": 0.89
+        },
+        "water_to_flour": {
+          "numerator": "water",
+          "denominator": "flour",
+          "as_percent": false,
+          "low": 0.28,
+          "high": 0.50
+        }
+      }
+    },
+    "panna_cotta": {
+      "basis": "documented",
+      "basis_note": "Documented range across tested/published recipes (set/don't-set language). A follow-up convergence check across 7 more recipes clustered tighter (0.73%-1.39%), possibly because none specified unmolding -- kept original band, per decision.",
+      "rule": "all",
+      "ratios": {
+        "gelatin_to_liquid": {
+          "numerator": "gelatin",
+          "denominator": "liquid",
+          "as_percent": true,
+          "low": 0.65,
+          "high": 3.9
+        }
+      }
+    },
+    "pastry_cream": {
+      "basis": "documented",
+      "basis_note": "Convergence across 12 independently-tested recipes (King Arthur x2, Scotch & Scones, Sally's Baking Addiction, Allrecipes, Serious Eats, Preppy Kitchen, Martha Stewart, Stay at Home Chef, Natasha's Kitchen, Food Network, one additional source). Dense cluster ~4.8%-6.6%; King Arthur GF (4.1%) and Preppy Kitchen's richer 6-yolk version (8.3%) are the outer bounds.",
+      "rule": "all",
+      "ratios": {
+        "cornstarch_to_dairy": {
+          "numerator": "cornstarch",
+          "denominator": "dairy_liquid",
+          "as_percent": true,
+          "low": 4.1,
+          "high": 8.3
+        }
+      }
+    },
+    "choux": {
+      "basis": "documented",
+      "basis_note": "Convergence across 10 independently-tested recipes (Ruhlman canonical, America's Test Kitchen, Food Network, Sally's Baking Addiction, Allrecipes, Bonni Bakery, King Arthur, The Flavor Bender, The Buttery Crust, one additional source). King Arthur's tested recipe (1.33:1) sets the low end; Bonni Bakery's own stated 5-6 egg range (1.92:1-2.31:1) sets the high end. Egg weight assumed ~50g/large egg, no shell, unless a source states shell-inclusive weight.",
+      "rule": "all",
+      "ratios": {
+        "egg_to_flour": {
+          "numerator": "egg",
+          "denominator": "flour",
+          "as_percent": false,
+          "low": 1.3,
+          "high": 2.3
+        }
+      }
+    }
+  },
+  "ingredient_matchers": {
+    "flour": {
+      "include": [
+        "flour",
+        "farina"
+      ],
+      "exclude": [
+        "cornflour",
+        "corn flour",
+        "almond flour",
+        "nut flour",
+        "coconut flour",
+        "rice flour",
+        "chickpea",
+        "buckwheat"
+      ]
+    },
+    "fat": {
+      "include": [
+        "butter",
+        "shortening",
+        "lard",
+        "suet",
+        "tallow",
+        "margarine",
+        "coconut oil",
+        "duck fat"
+      ],
+      "exclude": [
+        "buttermilk",
+        "butterscotch",
+        "peanut butter",
+        "nut butter",
+        "cocoa butter",
+        "butterfat",
+        "butter lettuce"
+      ]
+    },
+    "water": {
+      "_comment": "Pie-dough hydration only. 'liquid'/'vodka' are here because recipes routinely hedge the hydration line ('2.5-3 cups ice-cold liquid', 'half ice water and half cold vodka'); dropping those rows would make missingness correlate with the adjective and scale under test.",
+      "include": [
+        "water",
+        "ice water",
+        "iced water",
+        "ice-cold liquid",
+        "ice cold liquid",
+        "cold liquid",
+        "iced liquid",
+        "liquid",
+        "vodka"
+      ],
+      "exclude": [
+        "rosewater",
+        "rose water",
+        "orange blossom",
+        "orange flower",
+        "floral water",
+        "watermelon",
+        "coconut water",
+        "watercress"
+      ]
+    },
+    "egg": {
+      "include": [
+        "egg"
+      ],
+      "exclude": [
+        "eggplant",
+        "egg wash",
+        "eggnog",
+        "egg white powder"
+      ]
+    },
+    "cornstarch": {
+      "include": [
+        "cornstarch",
+        "corn starch",
+        "cornflour",
+        "corn flour"
+      ],
+      "exclude": []
+    },
+    "gelatin": {
+      "_comment": "Lines like 'cold water, for blooming gelatin' mention gelatin but are the blooming water, not the gelatin itself -- they belong in the liquid denominator only. Excluding 'water' keeps them out of the gelatin numerator; no genuine gelatin line contains the word 'water'.",
+      "include": [
+        "gelatin",
+        "gelatine"
+      ],
+      "exclude": [
+        "water"
+      ]
+    },
+    "dairy_liquid": {
+      "_comment": "Renamed from 'milk': the denominator is the total dairy the starch has to set, not the milk line alone. The King Arthur reference recipe is all milk, so the two agree there; a generation that swaps in cream is measured on what the cornstarch actually thickens.",
+      "include": [
+        "milk",
+        "cream",
+        "half-and-half",
+        "half and half"
+      ],
+      "exclude": [
+        "cream of tartar",
+        "ice cream",
+        "sour cream",
+        "creamer",
+        "creme fraiche",
+        "creme fraiche",
+        "buttermilk powder",
+        "milk powder",
+        "milk chocolate",
+        "coconut milk powder"
+      ]
+    },
+    "liquid": {
+      "include": [
+        "milk",
+        "cream",
+        "half-and-half",
+        "half and half",
+        "water",
+        "buttermilk"
+      ],
+      "exclude": [
+        "cream of tartar",
+        "sour cream",
+        "ice cream",
+        "creamer",
+        "rosewater",
+        "rose water",
+        "orange blossom",
+        "orange flower",
+        "floral water",
+        "milk powder",
+        "milk chocolate",
+        "watermelon",
+        "coconut water"
+      ]
+    }
+  }
+}
