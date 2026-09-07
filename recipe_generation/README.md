@@ -28,11 +28,11 @@ batch** — changing it invalidates every cached generation.
 
 | Recipe | Ratio | Pass band | Basis |
 |---|---|---|---|
-| Pie dough | fat:flour by weight | 0.50–0.75 | Published industry "good quality" range |
-| | water:flour by weight | 0.24–0.39 | King Arthur tested recipes |
+| Pie dough | fat:flour by weight | 0.68–0.89 | Convergence across 8 independently-tested recipes |
+| | water:flour by weight | 0.28–0.50 | Convergence across 8 independently-tested recipes |
 | Panna cotta | gelatin:liquid, weight % | 0.65%–3.9% | Documented range across tested/published recipes (set/don't-set language) |
 | Pastry cream | cornstarch:milk, weight % | 4.1%–8.3% | Convergence across 12 independently-tested recipes (King Arthur x2, Scotch & Scones, Sally's Baking Addiction, Allrecipes, Serious Eats, Preppy Kitchen, Martha Stewart, Stay at Home Chef, Natasha's Kitchen, Food Network, one additional source); dense cluster ~4.8%–6.6%, with King Arthur GF (4.1%) and Preppy Kitchen's richer 6-yolk version (8.3%) as outer bounds |
-| Choux | egg:flour by weight | 1.4:1–2.0:1 | Convergence across independently-tested recipes (Ruhlman canonical, America's Test Kitchen, Food Network, additional tested source) |
+| Choux | egg:flour by weight | 1.3:1–2.3:1 | Convergence across 10 independently-tested recipes (Ruhlman canonical, America's Test Kitchen, Food Network, Sally's Baking Addiction, Allrecipes, Bonni Bakery, King Arthur, The Flavor Bender, The Buttery Crust, one additional source) |
 
 Pie dough fails if **either** of its two ratios is out of band, not the average.
 

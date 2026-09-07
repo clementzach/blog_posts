@@ -9,10 +9,10 @@ Reports, per the study design:
     across the three numeric conditions and reports a slope per decade with a
     bootstrap CI, rather than only comparing four buckets by eye. The
     unmodified prompt has no number, so it is off that axis by construction.
-  * failure rate and deviation magnitude, REPORTED PER RECIPE. Pie dough and
-    panna cotta use documented pass bands; pastry cream and choux use inferred
-    +/-20% bands around a single tested ratio. Those are different kinds of
-    ground truth, so failure rates are never pooled across all four.
+  * failure rate and deviation magnitude, REPORTED PER RECIPE. All four bands
+    are documented ranges, but they draw on different numbers of independent
+    sources (see README). Not necessarily equally strict, so failure rates are
+    never pooled across all four.
 
 Deviation is measured as |log2(value / band_center)|: symmetric for a ratio, so
 "twice the center" and "half the center" score the same magnitude.
@@ -337,8 +337,9 @@ def plot_failure_rates(per_gen: pd.DataFrame, path) -> None:
     """Failure rate per recipe, grouped by adjective. Computed per generation
     (pie dough fails if EITHER of its ratios is out of band, which is not the
     same as averaging its two ratio-level rates). Kept as four separate groups,
-    never a single pooled bar: two recipes use documented bands and two use
-    inferred +/-20% bands."""
+    never a single pooled bar: all four bands are documented ranges, but they
+    draw on different numbers of independent sources and are not necessarily
+    equally strict."""
     scored = per_gen[per_gen["recipe_passed"].notna()]
     rate_by_cell = (
         scored.groupby(["recipe", "adjective"], observed=True)["recipe_passed"]
@@ -369,8 +370,8 @@ def plot_failure_rates(per_gen: pd.DataFrame, path) -> None:
     ax.set_yticklabels(["0%", "25%", "50%", "75%", "100%"])
     ax.set_ylabel("out-of-band rate", color=INK_MUTED, fontsize=9)
     ax.set_title("Out-of-band rate by recipe and adjective\n"
-                 "documented and inferred bands are not equally strict "
-                 "- compare within a recipe, not across",
+                 "bands draw on different numbers of sources and are not "
+                 "equally strict - compare within a recipe, not across",
                  color=INK, fontsize=12, loc="left")
     ax.legend(frameon=False, fontsize=9, labelcolor=INK_MUTED, ncol=3,
               loc="upper center", bbox_to_anchor=(0.5, -0.12))

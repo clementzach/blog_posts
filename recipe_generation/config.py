@@ -5,6 +5,8 @@ without touching call logic. Lock config.json before the full batch: changing
 wording invalidates every cached generation.
 """
 
+from __future__ import annotations
+
 import json
 from pathlib import Path
 
